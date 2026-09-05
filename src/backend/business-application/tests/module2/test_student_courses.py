@@ -63,6 +63,42 @@ class TestGetEnrolledCourses:
             assert isinstance(item["progress_percent"], float)
             assert 0.0 <= item["progress_percent"] <= 100.0
 
+    def test_get_enrolled_courses_returns_correct_progress(self, client):
+        response = client.get("/api/student/courses")
+        
+        assert response.status_code == 200
+        items = response.json()["items"]
+        
+        # In seed.py, student 1 is enrolled in python-fundamentals (free) and advanced-algorithms (paid)
+        # free_course has 3 contents, all 3 are completed = 100.0%
+        # paid_course has 1 content, 0 completed = 0.0%
+        for item in items:
+            if item["slug"] == "python-fundamentals":
+                assert item["progress_percent"] == 100.0
+            elif item["slug"] == "advanced-algorithms":
+                assert item["progress_percent"] == 0.0
+
+    def test_get_enrolled_courses_returns_empty_when_no_enrollments(self, unauth_client):
+        # Create a new user override that has no enrollments
+        def override_get_no_enrollments_user():
+            return {"sub": 99999, "email": "empty@gmail.com", "roles": ["STUDENT"]}
+            
+        from src.app import app
+        from src.middlewares.auth_middleware import get_current_user
+        from tests.module2.conftest import override_get_async_db_session
+        from src.db import get_async_db_session
+        
+        app.dependency_overrides[get_current_user] = override_get_no_enrollments_user
+        app.dependency_overrides[get_async_db_session] = override_get_async_db_session
+        
+        response = unauth_client.get("/api/student/courses")
+        
+        assert response.status_code == 200
+        assert response.json()["items"] == []
+        
+        app.dependency_overrides.pop(get_current_user, None)
+        app.dependency_overrides.pop(get_async_db_session, None)
+
     def test_get_enrolled_courses_returns_401_without_auth(self, unauth_client):
         response = unauth_client.get("/api/student/courses")
 

@@ -91,10 +91,10 @@ class LessonContentStudyResponse(BaseModel):
     id: int
     content_type: LessonContentType
     media_url: Optional[str] = None
+    quiz_id: Optional[int] = None
+    reading_content_id: Optional[int] = None
     completed: bool
     model_config = ConfigDict(from_attributes=True)
-
-
 class LessonStudyResponse(BaseModel):
     id: int
     title: str

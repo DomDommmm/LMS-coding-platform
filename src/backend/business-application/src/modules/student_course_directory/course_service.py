@@ -11,6 +11,7 @@ from src.models.course_review_model import CourseReviewModel
 from src.models.section_model import SectionModel
 from src.models.lesson_model import LessonModel
 from src.models.lesson_content_progress_model import LessonContentProgressModel
+from src.models.lesson_content_model import LessonContentModel
 from sqlalchemy.orm import selectinload
 from sqlalchemy import select, or_, func, delete
 from src.modules.student_course_directory.course_dto import (
@@ -818,7 +819,63 @@ class CourseService:
     # ------------------------------------------------------------------
 
     async def get_enrolled_courses(self, user_id: int) -> StudentCoursesResponse:
-        return StudentCoursesResponse(items=_MOCK_ENROLLED_COURSES)
+        # Compute total lesson contents per course
+        total_contents_sq = (
+            select(SectionModel.course_id, func.count(LessonContentModel.id).label("total"))
+            .join(LessonModel, LessonModel.section_id == SectionModel.id)
+            .join(LessonContentModel, LessonContentModel.lesson_id == LessonModel.id)
+            .group_by(SectionModel.course_id)
+        ).subquery()
+
+        # Compute completed lesson contents per course for this user
+        completed_contents_sq = (
+            select(
+                EnrollmentModel.course_id,
+                func.count(LessonContentProgressModel.id).label("completed")
+            )
+            .join(LessonContentProgressModel, LessonContentProgressModel.enrollment_id == EnrollmentModel.id)
+            .where(
+                LessonContentProgressModel.completed == True,
+                EnrollmentModel.student_id == user_id
+            )
+            .group_by(EnrollmentModel.course_id)
+        ).subquery()
+
+        # Fetch enrollments
+        stmt = (
+            select(
+                EnrollmentModel,
+                CourseModel,
+                func.coalesce(total_contents_sq.c.total, 0).label("total"),
+                func.coalesce(completed_contents_sq.c.completed, 0).label("completed")
+            )
+            .join(CourseModel, EnrollmentModel.course_id == CourseModel.id)
+            .outerjoin(total_contents_sq, CourseModel.id == total_contents_sq.c.course_id)
+            .outerjoin(completed_contents_sq, CourseModel.id == completed_contents_sq.c.course_id)
+            .where(
+                EnrollmentModel.student_id == user_id,
+                EnrollmentModel.status == EnrollStatus.ENROLLED.value
+            )
+        )
+        
+        result = await self.db_session.execute(stmt)
+        rows = result.all()
+        
+        items = []
+        for enrollment, course, total_count, completed_count in rows:
+            progress_percent = 0.0
+            if total_count > 0:
+                progress_percent = round((completed_count / total_count) * 100, 2)
+                
+            items.append(EnrolledCourseResponse(
+                id=course.id,
+                slug=course.slug,
+                title=course.title,
+                thumbnail_url=course.thumbnail_url or "",
+                progress_percent=progress_percent
+            ))
+            
+        return StudentCoursesResponse(items=items)
 
     # ------------------------------------------------------------------
     # Endpoint 5 — GET /student/courses/{slug}/study

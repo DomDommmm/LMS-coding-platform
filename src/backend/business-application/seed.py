@@ -46,6 +46,7 @@ from src.models.course_moderation_review_model import CourseModerationReviewMode
 from src.models.course_model import CourseModel
 from src.models.course_review_model import CourseReviewModel
 from src.models.enrollment_model import EnrollmentModel
+from src.modules.student_course_directory.course_dto import EnrollStatus
 from src.models.interview_message_model import InterviewMessageModel
 from src.models.interview_report_model import InterviewReportModel
 from src.models.interview_session_model import InterviewSessionModel
@@ -414,8 +415,8 @@ async def seed_learning_and_commerce(
 ) -> dict[str, Any]:
     teacher = users["teacher"]
     student = users["student"]
-    free_enrollment = EnrollmentModel(student_id=student.id, course_id=graph["free_course"].id, status="active", enrolled_at=seed_time - timedelta(days=5))
-    paid_enrollment = EnrollmentModel(student_id=student.id, course_id=graph["paid_course"].id, status="active", enrolled_at=seed_time - timedelta(days=2))
+    free_enrollment = EnrollmentModel(student_id=student.id, course_id=graph["free_course"].id, status=EnrollStatus.ENROLLED.value, enrolled_at=seed_time - timedelta(days=5))
+    paid_enrollment = EnrollmentModel(student_id=student.id, course_id=graph["paid_course"].id, status=EnrollStatus.ENROLLED.value, enrolled_at=seed_time - timedelta(days=2))
     session.add_all([free_enrollment, paid_enrollment])
     await session.flush()
     session.add_all(
