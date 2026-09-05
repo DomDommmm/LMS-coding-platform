@@ -970,13 +970,70 @@ class CourseService:
     async def complete_lesson_content(
         self, lesson_content_id: int, user_id: int
     ) -> CompleteContentResponse:
-        if lesson_content_id not in _VALID_LESSON_CONTENT_IDS:
-            raise HTTPException(
-                status_code=404, detail="Lesson content not found"
+        # Join content -> lesson -> section -> course to find course_id
+        # Then join enrollment to verify the student is enrolled in that course
+        stmt = (
+            select(LessonContentModel, EnrollmentModel)
+            .join(LessonModel, LessonContentModel.lesson_id == LessonModel.id)
+            .join(SectionModel, LessonModel.section_id == SectionModel.id)
+            .join(CourseModel, SectionModel.course_id == CourseModel.id)
+            .outerjoin(
+                EnrollmentModel, 
+                (EnrollmentModel.course_id == CourseModel.id) & 
+                (EnrollmentModel.student_id == user_id) & 
+                (EnrollmentModel.status == EnrollStatus.ENROLLED.value)
             )
+            .where(LessonContentModel.id == lesson_content_id)
+        )
+        
+        result = await self.db_session.execute(stmt)
+        row = result.first()
+        
+        if not row:
+            # Content doesn't exist
+            raise HTTPException(status_code=404, detail="Lesson content not found")
+            
+        content, enrollment = row
+        
+        if not enrollment:
+            # Content exists, but user is not enrolled -> 403 to match get_study_content ownership logic
+            raise HTTPException(status_code=403, detail="Not enrolled in this course")
+            
+        if content.content_type != LessonContentType.READING:
+            # Block Quiz/Problem completion from client
+            raise HTTPException(
+                status_code=400, 
+                detail="Only READING content can be marked as completed by client"
+            )
+            
+        # Check existing progress (idempotency)
+        progress_stmt = select(LessonContentProgressModel).where(
+            LessonContentProgressModel.enrollment_id == enrollment.id,
+            LessonContentProgressModel.lesson_content_id == lesson_content_id
+        )
+        progress_result = await self.db_session.execute(progress_stmt)
+        progress = progress_result.scalar_one_or_none()
+        
+        now = datetime.now(timezone.utc)
+        
+        if progress:
+            if not progress.completed:
+                progress.completed = True
+                progress.completed_at = now
+        else:
+            progress = LessonContentProgressModel(
+                enrollment_id=enrollment.id,
+                lesson_content_id=lesson_content_id,
+                completed=True,
+                completed_at=now
+            )
+            self.db_session.add(progress)
+            
+        await self.db_session.flush()
+        
         return CompleteContentResponse(
             message="Lesson content marked as completed",
-            completed_at=datetime.now(timezone.utc),
+            completed_at=progress.completed_at or now,
         )
 
     # ------------------------------------------------------------------

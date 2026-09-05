@@ -64,7 +64,7 @@ async def get_study_content(
 # ---------------------------------------------------------------------------
 
 @router.post(
-    "/progress/lesson-content/{id}/complete",
+    "/progress/lesson-contents/{id}/complete",
     response_model=CompleteContentResponse,
     status_code=200,
 )
