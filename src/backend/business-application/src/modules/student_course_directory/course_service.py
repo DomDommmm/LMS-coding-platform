@@ -882,13 +882,86 @@ class CourseService:
     # ------------------------------------------------------------------
 
     async def get_study_content(self, slug: str, user_id: int) -> StudyResponse:
-        study = _MOCK_STUDY_DATA.get(slug)
-        if study is None:
-            raise HTTPException(
-                status_code=404,
-                detail="Course not found or not enrolled",
+        # First, find the course and check enrollment
+        stmt = (
+            select(CourseModel, EnrollmentModel)
+            .outerjoin(EnrollmentModel, (EnrollmentModel.course_id == CourseModel.id) & (EnrollmentModel.student_id == user_id))
+            .where(CourseModel.slug == slug)
+            .options(
+                selectinload(CourseModel.sections).selectinload(SectionModel.lessons).selectinload(LessonModel.contents)
             )
-        return study
+        )
+        
+        result = await self.db_session.execute(stmt)
+        row = result.first()
+        
+        if not row:
+            # Course doesn't exist at all -> 404
+            raise HTTPException(status_code=404, detail="Course not found")
+            
+        course, enrollment = row
+        
+        if not enrollment or enrollment.status != EnrollStatus.ENROLLED.value:
+            # Course exists but user not enrolled -> 403
+            raise HTTPException(status_code=403, detail="Not enrolled in this course")
+
+        # Fetch progress for this enrollment
+        progress_stmt = select(LessonContentProgressModel).where(
+            LessonContentProgressModel.enrollment_id == enrollment.id
+        )
+        progress_result = await self.db_session.execute(progress_stmt)
+        progress_map = {p.lesson_content_id: p.completed for p in progress_result.scalars().all()}
+
+        # Build response
+        sections_resp = []
+        for section in course.sections:
+            lessons_resp = []
+            for lesson in section.lessons:
+                contents_resp = []
+                for content in sorted(lesson.contents, key=lambda x: x.position):
+                    # Resolve specific content IDs based on content_type
+                    reading_id = None
+                    quiz_id = None
+                    # problem_id = None  # Problem ID not currently in DTO
+                    if content.content_type == LessonContentType.READING:
+                        reading_id = content.content_id
+                    elif content.content_type == LessonContentType.QUIZ:
+                        quiz_id = content.content_id
+
+                    contents_resp.append(LessonContentStudyResponse(
+                        id=content.id,
+                        content_type=content.content_type,
+                        media_url=content.media_url,
+                        completed=progress_map.get(content.id, False),
+                        reading_content_id=reading_id,
+                        quiz_id=quiz_id,
+                    ))
+                
+                lessons_resp.append(LessonStudyResponse(
+                    id=lesson.id,
+                    title=lesson.title,
+                    position=lesson.position,
+                    locked=False, # No completion_policy in schema yet, default to False
+                    contents=contents_resp
+                ))
+            
+            # Sort lessons by position
+            lessons_resp.sort(key=lambda x: x.position)
+            
+            sections_resp.append(SectionStudyResponse(
+                id=section.id,
+                title=section.title,
+                position=section.position,
+                lessons=lessons_resp
+            ))
+            
+        # Sort sections by position
+        sections_resp.sort(key=lambda x: x.position)
+        
+        return StudyResponse(
+            course_slug=course.slug,
+            sections=sections_resp
+        )
 
     # ------------------------------------------------------------------
     # Endpoint 6 — POST /student/progress/lesson-content/{id}/complete
