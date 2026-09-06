@@ -17,9 +17,11 @@ Module này quản lý các tính năng liên quan đến học viên, danh mụ
 - `GET /api/courses/{slug}/study-content`: Lấy nội dung học thuật để bắt đầu học.
 - `POST /api/lessons/{lesson_content_id}/complete`: Đánh dấu hoàn thành một nội dung học tập.
 
-### 3. Quiz & Thực hành
-- `GET /api/quizzes/{quiz_id}`: Lấy thông tin bài tập trắc nghiệm (không lộ đáp án).
-- `POST /api/quizzes/{quiz_id}/submit`: Nộp bài, tự động chấm điểm và trả về kết quả.
+### 3. Quiz & Thực hành (Student Study Mode)
+- `POST /api/quizzes/{quiz_id}/attempts`: Bắt đầu làm bài (tạo Attempt). Nếu có attempt đang IN_PROGRESS, sẽ bị đánh dấu ABANDONED. Kiểm tra `max_attempts` giới hạn.
+- `GET /api/quizzes/{quiz_id}/attempts/{attempt_id}`: Lấy đề bài chi tiết (không lộ đáp án đúng).
+- `POST /api/quizzes/{quiz_id}/attempts/{attempt_id}/submit`: Nộp bài. Tự động chấm điểm dựa trên trọng số (`points`) của từng câu. Đánh dấu `passed` dựa vào `passing_score`. Tự động cập nhật `LessonContentProgress` nếu pass. Tránh nộp lại 2 lần (idempotent) và chặn nộp attempt đã ABANDONED.
+- `GET /api/quizzes/{quiz_id}/attempts`: Lấy danh sách lịch sử làm bài.
 
 ### 4. Yêu thích khóa học (Course Favorite)
 - `GET /api/favorites`: Lấy danh sách khóa học yêu thích của học viên.
@@ -90,3 +92,6 @@ Các thay đổi quan trọng đã được thực hiện trong suốt chu kỳ 
   - Bỏ các giá trị hard-code teacher_id để logic lấy role/ownership động quay trở lại hoạt động bình thường.
 - **7. Sửa lỗi permission tiềm ẩn (SEED_STUDENT)**: 
   - Phát hiện và sửa lỗi khai báo mock JWT roles cho user giả lập (`"student"` -> `"STUDENT"`) để phù hợp với quy tắc in hoa của Base Model (`Role.STUDENT`).
+- **8. Hoàn thiện Student Study Mode & Quiz Attempt Architecture**:
+  - Nối DB cho `get_enrolled_courses`, `get_study_content`, `complete_lesson_content`.
+  - Thiết kế lại toàn bộ flow làm bài trắc nghiệm với 4 API mới: tạo attempt, lấy đề bài (ẩn đáp án), chấm điểm (tính toán `LessonContentProgress` tự động nếu pass), và xem lịch sử làm bài.
