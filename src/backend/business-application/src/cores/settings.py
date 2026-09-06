@@ -36,3 +36,8 @@ MINIO_ACCESS_KEY = get_env_var('MINIO_ACCESS_KEY')
 MINIO_SECRET_KEY = get_env_var('MINIO_SECRET_KEY')
 MINIO_BUCKET_NAME = get_env_var('MINIO_BUCKET_NAME')
 MINIO_PORT = get_env_var('MINIO_PORT')
+
+PAYOS_CLIENT_ID = get_env_var("PAYOS_CLIENT_ID", "")
+PAYOS_API_KEY = get_env_var("PAYOS_API_KEY", "")
+PAYOS_CHECKSUM_KEY = get_env_var("PAYOS_CHECKSUM_KEY", "")
+FE_URL = get_env_var("FE_URL", "http://localhost:5173")

@@ -9,7 +9,13 @@ class PublicKeyService:
     _public_key: str | None = None
 
     _FALLBACK_KEY = """-----BEGIN PUBLIC KEY-----
-...
+MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAgIbaK/750rUs0CVcPswK
+mJTVu6i3gHeUNQrpTSBlSRayGt9teX9CQuzaTRNfUzmlJkhn7SzOEORjDCP+4qqr
+IbKy/Ded9Ch8VboEfeXp9+yz5Sp/8LvWhhmisyax9DRGIRIsm9va7aBptQqFGlsa
+oNEsKmAPc17elPP2/tr5Ni9wjiuPmPoo/0m+FFsG0JAeVhwAH8ep860dVtOViFMK
+wa9kdITJEi8L+5tZE/eqjlXVY0jyQsd5A9QEigad4WKezlUDrZfYcXHw59CUQmiU
+0Ny4LKg/7ovARgqyoTpaKP4H3SdiCCqP+UbT0hS9E0j5mhbdZ5ZouC9fDZSfG3XV
+kwIDAQAB
 -----END PUBLIC KEY-----"""
 
     @classmethod

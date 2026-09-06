@@ -26,6 +26,8 @@ from src.services.rabbitmq.submission_execution_result_consumer import (
 )
 from src.services.sse.sse_manager import SSEManager
 
+from src.modules.payment.payment_router import router as payment_router
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -44,22 +46,24 @@ async def lifespan(app: FastAPI):
 
     # rabbit_mq manager
     rabbitmq_manager = RabbitMQManager(url=RABBITMQ_URL)
-    # rabbit_mq consumer connect
-    await rabbitmq_manager.connect()
+    try:
+        await rabbitmq_manager.connect()
+        async def handle_submission_result(job):
+            await handle_submission_execution_result(job, sse_manager)
 
-    # consumer register
-    async def handle_submission_result(job):
-        await handle_submission_execution_result(job, sse_manager)
-
-    await rabbitmq_manager.consume(
-        SUBMISSION_EXECUTION_RESULT_QUEUE, handle_submission_result
-    )
-    # register to the application
-    app.state.rabbitmq_manager = rabbitmq_manager
+        await rabbitmq_manager.consume(
+            SUBMISSION_EXECUTION_RESULT_QUEUE, handle_submission_result
+        )
+        app.state.rabbitmq_manager = rabbitmq_manager
+        print("Connected to RabbitMQ")
+    except Exception as e:
+        app.state.rabbitmq_manager = None
+        print(f"Warning: Cannot connect to RabbitMQ ({e}). Running without background submission queue.")
 
     yield
-    await rabbitmq_manager.close()
-    print("Rabbit MQ stopped")
+    if getattr(app.state, "rabbitmq_manager", None):
+        await app.state.rabbitmq_manager.close()
+        print("Rabbit MQ stopped")
     await client.close()
     print("Grpc client stopped")
     app.state.sse_manager = None
@@ -88,6 +92,8 @@ v1_router.include_router(lesson_comment_router)
 v1_router.include_router(teacher_router)
 v1_router.include_router(user_router)
 v1_router.include_router(admin_router)
+
+v1_router.include_router(payment_router)
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request, exc: RequestValidationError):
