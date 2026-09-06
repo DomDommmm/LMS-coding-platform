@@ -35,7 +35,12 @@ from src.modules.student_course_directory.course_dto import (
     StudentCoursesResponse,
     StudyResponse,
     UnenrollResponse,
+    QuizAttemptView,
 )
+from src.models.quiz_model import QuizModel
+from src.models.quiz_attempt_model import QuizAttemptModel
+from src.models.quiz_submission_model import QuizSubmissionModel
+from src.models.base_model import QuizAttemptStatus
 
 # ---------------------------------------------------------------------------
 # Static mock catalogue — realistic data, no placeholder strings
@@ -1035,6 +1040,267 @@ class CourseService:
             message="Lesson content marked as completed",
             completed_at=progress.completed_at or now,
         )
+
+    async def create_quiz_attempt(
+        self, quiz_id: int, user_id: int
+    ) -> QuizAttemptView:
+        from src.models.quiz_enrollment_model import QuizEnrollmentModel
+        
+        # 1. Fetch quiz
+        quiz = await self.db_session.get(QuizModel, quiz_id)
+        if not quiz or quiz.deleted_at:
+            raise HTTPException(status_code=404, detail="Quiz not found")
+            
+        # 2. Verify enrollment
+        enrollment_stmt = select(QuizEnrollmentModel).where(
+            QuizEnrollmentModel.quiz_id == quiz_id,
+            QuizEnrollmentModel.student_id == user_id
+        )
+        enrollment_result = await self.db_session.execute(enrollment_stmt)
+        if not enrollment_result.scalar_one_or_none():
+            raise HTTPException(status_code=403, detail="Not enrolled in this quiz")
+            
+        # 3. Handle existing IN_PROGRESS attempt
+        in_progress_stmt = select(QuizAttemptModel).where(
+            QuizAttemptModel.quiz_id == quiz_id,
+            QuizAttemptModel.student_id == user_id,
+            QuizAttemptModel.status == QuizAttemptStatus.IN_PROGRESS
+        )
+        in_progress_result = await self.db_session.execute(in_progress_stmt)
+        in_progress = in_progress_result.scalar_one_or_none()
+        
+        if in_progress:
+            in_progress.status = QuizAttemptStatus.ABANDONED
+            
+        # 4. Check limits (count SUBMITTED attempts)
+        submitted_stmt = select(func.count(QuizAttemptModel.id)).where(
+            QuizAttemptModel.quiz_id == quiz_id,
+            QuizAttemptModel.student_id == user_id,
+            QuizAttemptModel.status == QuizAttemptStatus.SUBMITTED
+        )
+        submitted_count = (await self.db_session.execute(submitted_stmt)).scalar_one()
+        
+        if quiz.attempts is not None and submitted_count >= quiz.attempts:
+            raise HTTPException(status_code=400, detail="Maximum attempts reached")
+            
+        # 5. Determine new attempt_no
+        max_attempt_stmt = select(func.max(QuizAttemptModel.attempt_no)).where(
+            QuizAttemptModel.quiz_id == quiz_id,
+            QuizAttemptModel.student_id == user_id
+        )
+        max_attempt = (await self.db_session.execute(max_attempt_stmt)).scalar_one() or 0
+        new_attempt_no = max_attempt + 1
+        
+        # 6. Create new attempt
+        new_attempt = QuizAttemptModel(
+            quiz_id=quiz_id,
+            student_id=user_id,
+            attempt_no=new_attempt_no,
+            status=QuizAttemptStatus.IN_PROGRESS,
+        )
+        self.db_session.add(new_attempt)
+        await self.db_session.flush()
+        
+        attempts_left = quiz.attempts - submitted_count if quiz.attempts is not None else None
+        
+        return QuizAttemptView(
+            id=new_attempt.id,
+            quiz_id=quiz_id,
+            student_id=user_id,
+            attempt_no=new_attempt_no,
+            status=new_attempt.status,
+            started_at=new_attempt.started_at,
+            submitted_at=new_attempt.submitted_at,
+            passed=None,
+            attempts_left=attempts_left,
+            expires_at=quiz.end_date,
+            questions=None,
+            submission=None
+        )
+
+    async def get_quiz_attempt(
+        self, quiz_id: int, attempt_id: int, user_id: int
+    ) -> QuizAttemptView:
+        from sqlalchemy.orm import selectinload
+        
+        from src.models.quiz_question_model import QuizQuestionModel
+        
+        # 1. Fetch attempt and eager load submission + quiz + questions + options
+        stmt = (
+            select(QuizAttemptModel)
+            .options(
+                selectinload(QuizAttemptModel.quiz)
+                .selectinload(QuizModel.questions)
+                .selectinload(QuizQuestionModel.options),
+                selectinload(QuizAttemptModel.submission)
+            )
+            .where(
+                QuizAttemptModel.id == attempt_id,
+                QuizAttemptModel.quiz_id == quiz_id,
+                QuizAttemptModel.student_id == user_id
+            )
+        )
+        result = await self.db_session.execute(stmt)
+        attempt = result.scalar_one_or_none()
+        
+        if not attempt:
+            raise HTTPException(status_code=404, detail="Attempt not found")
+            
+        quiz = attempt.quiz
+        if quiz.deleted_at:
+            raise HTTPException(status_code=404, detail="Quiz not found")
+            
+        # Calculate attempts left
+        submitted_stmt = select(func.count(QuizAttemptModel.id)).where(
+            QuizAttemptModel.quiz_id == quiz_id,
+            QuizAttemptModel.student_id == user_id,
+            QuizAttemptModel.status == QuizAttemptStatus.SUBMITTED
+        )
+        submitted_count = (await self.db_session.execute(submitted_stmt)).scalar_one()
+        attempts_left = quiz.attempts - submitted_count if quiz.attempts is not None else None
+        
+        passed = None
+        if attempt.submission:
+            passed = attempt.submission.score >= quiz.passing_score
+            
+        return QuizAttemptView(
+            id=attempt.id,
+            quiz_id=attempt.quiz_id,
+            student_id=attempt.student_id,
+            attempt_no=attempt.attempt_no,
+            status=attempt.status,
+            started_at=attempt.started_at,
+            submitted_at=attempt.submitted_at,
+            passed=passed,
+            attempts_left=attempts_left,
+            expires_at=quiz.end_date,
+            questions=quiz.questions,  # DTO auto maps QuizQuestionResponse, doesn't leak is_correct
+            submission=attempt.submission
+        )
+    async def submit_quiz_attempt(
+        self, quiz_id: int, attempt_id: int, payload: QuizSubmitRequest, user_id: int
+    ) -> QuizAttemptView:
+        from sqlalchemy.orm import selectinload
+        from src.models.quiz_question_model import QuizQuestionModel
+        from src.models.quiz_option_model import QuizOptionModel
+        from src.models.quiz_submission_model import QuizSubmissionModel
+        
+        # 1. Fetch attempt + quiz + questions + options
+        stmt = (
+            select(QuizAttemptModel)
+            .options(
+                selectinload(QuizAttemptModel.quiz).selectinload(QuizModel.questions).selectinload(QuizQuestionModel.options),
+                selectinload(QuizAttemptModel.submission)
+            )
+            .where(
+                QuizAttemptModel.id == attempt_id,
+                QuizAttemptModel.quiz_id == quiz_id,
+                QuizAttemptModel.student_id == user_id
+            )
+        )
+        attempt = (await self.db_session.execute(stmt)).scalar_one_or_none()
+        if not attempt:
+            raise HTTPException(status_code=404, detail="Attempt not found")
+            
+        quiz = attempt.quiz
+        if quiz.deleted_at:
+            raise HTTPException(status_code=404, detail="Quiz not found")
+            
+        # 2. Check status (Idempotent for SUBMITTED, error for ABANDONED)
+        if attempt.status == QuizAttemptStatus.SUBMITTED:
+            return await self.get_quiz_attempt(quiz_id, attempt_id, user_id)
+        if attempt.status == QuizAttemptStatus.ABANDONED:
+            raise HTTPException(status_code=400, detail="Cannot submit an abandoned attempt")
+            
+        # 3. Calculate score with weights (points)
+        earned_points = 0.0
+        total_points = sum(float(q.points) for q in quiz.questions)
+        
+        # Build answer key dict
+        answer_key = {}
+        for q in quiz.questions:
+            for opt in q.options:
+                if opt.is_correct:
+                    answer_key[q.id] = (opt.id, float(q.points))
+                    break
+                    
+        # Score answers
+        for q_id, opt_id in payload.answers.items():
+            correct_opt_id, points = answer_key.get(q_id, (None, 0.0))
+            if correct_opt_id == opt_id:
+                earned_points += points
+                
+        # Calculate percentage based on weighted points
+        score = (earned_points / total_points * 100) if total_points > 0 else 0.0
+        passed = score >= float(quiz.passing_score)
+        
+        now = datetime.now(timezone.utc)
+        
+        # 4. Create submission
+        import json
+        submission = QuizSubmissionModel(
+            quiz_attempt_id=attempt.id,
+            score=score,
+            answers=json.dumps(payload.answers),
+            submitted_at=now
+        )
+        self.db_session.add(submission)
+        
+        # 5. Update attempt status
+        attempt.status = QuizAttemptStatus.SUBMITTED
+        attempt.submitted_at = now
+        attempt.submission = submission
+        await self.db_session.flush()
+        
+        # 6. Side effect: Mark LessonContent as completed if passed
+        if passed:
+            from src.models.lesson_content_model import LessonContentModel, LessonContentType
+            from src.models.lesson_content_progress_model import LessonContentProgressModel
+            
+            # Find the lesson content ID for this quiz
+            from sqlalchemy.orm import selectinload
+            from src.models.lesson_model import LessonModel
+            from src.models.section_model import SectionModel
+            content_stmt = select(LessonContentModel).options(
+                selectinload(LessonContentModel.lesson).selectinload(LessonModel.section)
+            ).where(
+                LessonContentModel.content_type == LessonContentType.QUIZ,
+                LessonContentModel.content_id == quiz_id
+            )
+            lesson_content = (await self.db_session.execute(content_stmt)).scalar_one_or_none()
+            
+            if lesson_content:
+                content_id = lesson_content.id
+                course_id = lesson_content.lesson.section.course_id
+                from src.models.enrollment_model import EnrollmentModel
+                # Find enrollment_id first
+                enroll_stmt = select(EnrollmentModel.id).where(
+                    EnrollmentModel.course_id == course_id,
+                    EnrollmentModel.student_id == user_id
+                )
+                enroll_id = (await self.db_session.execute(enroll_stmt)).scalar_one_or_none()
+                
+                if enroll_id:
+                    progress_stmt = select(LessonContentProgressModel).where(
+                        LessonContentProgressModel.lesson_content_id == content_id,
+                        LessonContentProgressModel.enrollment_id == enroll_id
+                    )
+                    progress = (await self.db_session.execute(progress_stmt)).scalar_one_or_none()
+                    if not progress:
+                        progress = LessonContentProgressModel(
+                            lesson_content_id=content_id,
+                            enrollment_id=enroll_id,
+                            completed=True,
+                            completed_at=now
+                        )
+                        self.db_session.add(progress)
+                    elif not progress.completed:
+                        progress.completed = True
+                        progress.completed_at = now
+                    
+                await self.db_session.flush()
+                
+        return await self.get_quiz_attempt(quiz_id, attempt_id, user_id)
 
     # ------------------------------------------------------------------
     # Endpoint 7 — GET /student/quizzes/{quizId}

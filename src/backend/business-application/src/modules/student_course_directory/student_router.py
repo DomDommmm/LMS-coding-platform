@@ -11,6 +11,7 @@ from src.modules.student_course_directory.course_dto import (
     QuizSubmitResponse,
     StudentCoursesResponse,
     StudyResponse,
+    QuizAttemptView,
 )
 from src.modules.student_course_directory.course_service import CourseService
 
@@ -76,6 +77,47 @@ async def complete_lesson_content(
     user_id = _extract_user_id(user)
     return await service.complete_lesson_content(lesson_content_id, user_id)
 
+@router.post(
+    "/quizzes/{quiz_id}/attempts",
+    response_model=QuizAttemptView,
+    status_code=201,
+)
+async def create_quiz_attempt(
+    quiz_id: int,
+    user: UserPayload = Depends(get_current_user),
+    service: CourseService = Depends(get_course_service),
+) -> QuizAttemptView:
+    user_id = _extract_user_id(user)
+    return await service.create_quiz_attempt(quiz_id, user_id)
+
+@router.get(
+    "/quizzes/{quiz_id}/attempts/{attempt_id}",
+    response_model=QuizAttemptView,
+    status_code=200,
+)
+async def get_quiz_attempt(
+    quiz_id: int,
+    attempt_id: int,
+    user: UserPayload = Depends(get_current_user),
+    service: CourseService = Depends(get_course_service),
+) -> QuizAttemptView:
+    user_id = _extract_user_id(user)
+    return await service.get_quiz_attempt(quiz_id, attempt_id, user_id)
+
+@router.post(
+    "/quizzes/{quiz_id}/attempts/{attempt_id}/submit",
+    response_model=QuizAttemptView,
+    status_code=200,
+)
+async def submit_quiz_attempt(
+    quiz_id: int,
+    attempt_id: int,
+    payload: QuizSubmitRequest,
+    user: UserPayload = Depends(get_current_user),
+    service: CourseService = Depends(get_course_service),
+) -> QuizAttemptView:
+    user_id = _extract_user_id(user)
+    return await service.submit_quiz_attempt(quiz_id, attempt_id, payload, user_id)
 
 # ---------------------------------------------------------------------------
 # Endpoint 7 — GET /student/quizzes/{quizId}
