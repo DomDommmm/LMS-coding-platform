@@ -39,10 +39,19 @@ class TestQuizAttempt:
         async_db_session = await anext(session_gen)
         try:
             service = CourseService(db_session=async_db_session)
+            
+            # 1. Create attempt should succeed (since seeded user 1 is enrolled in python-fundamentals)
+            attempt = await service.create_quiz_attempt(1, 1)
+            assert attempt.id is not None
+            
+            # 2. Unenroll from course
+            await service.unenroll_course("python-fundamentals", 1)
+            
+            # 3. Try to create another attempt -> should fail with 403
             with pytest.raises(HTTPException) as exc:
-                # 999 is an invalid quiz ID, but even if it was valid, user 999 is not enrolled
-                await service.create_quiz_attempt(999, 1)
-            assert exc.value.status_code in [403, 404]
+                await service.create_quiz_attempt(1, 1)
+            assert exc.value.status_code == 403
+            assert "Not enrolled" in exc.value.detail
         finally:
             await session_gen.aclose()
 

@@ -1042,24 +1042,51 @@ class CourseService:
             completed_at=progress.completed_at or now,
         )
 
+    async def _verify_quiz_enrollment(self, quiz_id: int, user_id: int):
+        from sqlalchemy.orm import selectinload
+        from sqlalchemy import select
+        from src.models.lesson_content_model import LessonContentModel, LessonContentType
+        from src.models.lesson_model import LessonModel
+        from src.models.section_model import SectionModel
+        from src.models.enrollment_model import EnrollmentModel
+        from src.modules.student_course_directory.course_dto import EnrollStatus
+        from fastapi import HTTPException
+        
+        stmt = (
+            select(LessonContentModel)
+            .options(
+                selectinload(LessonContentModel.lesson).selectinload(LessonModel.section)
+            )
+            .where(
+                LessonContentModel.content_type == LessonContentType.QUIZ,
+                LessonContentModel.content_id == quiz_id
+            )
+        )
+        lesson_content = (await self.db_session.execute(stmt)).scalar_one_or_none()
+        if not lesson_content:
+            raise HTTPException(status_code=404, detail="Quiz not found in any curriculum")
+            
+        course_id = lesson_content.lesson.section.course_id
+        
+        enroll_stmt = select(EnrollmentModel).where(
+            EnrollmentModel.student_id == user_id,
+            EnrollmentModel.course_id == course_id,
+            EnrollmentModel.status == EnrollStatus.ENROLLED.value
+        )
+        enrollment = (await self.db_session.execute(enroll_stmt)).scalar_one_or_none()
+        if not enrollment:
+            raise HTTPException(status_code=403, detail="Not enrolled in the course containing this quiz")
+
     async def create_quiz_attempt(
         self, quiz_id: int, user_id: int
     ) -> QuizAttemptView:
-        from src.models.quiz_enrollment_model import QuizEnrollmentModel
+        # 1. Verify course enrollment first
+        await self._verify_quiz_enrollment(quiz_id, user_id)
         
-        # 1. Fetch quiz
+        # 2. Fetch quiz
         quiz = await self.db_session.get(QuizModel, quiz_id)
         if not quiz or quiz.deleted_at:
             raise HTTPException(status_code=404, detail="Quiz not found")
-            
-        # 2. Verify enrollment
-        enrollment_stmt = select(QuizEnrollmentModel).where(
-            QuizEnrollmentModel.quiz_id == quiz_id,
-            QuizEnrollmentModel.student_id == user_id
-        )
-        enrollment_result = await self.db_session.execute(enrollment_stmt)
-        if not enrollment_result.scalar_one_or_none():
-            raise HTTPException(status_code=403, detail="Not enrolled in this quiz")
             
         # 3. Handle existing IN_PROGRESS attempt
         in_progress_stmt = select(QuizAttemptModel).where(
@@ -1122,6 +1149,8 @@ class CourseService:
     async def get_quiz_attempt(
         self, quiz_id: int, attempt_id: int, user_id: int
     ) -> QuizAttemptView:
+        await self._verify_quiz_enrollment(quiz_id, user_id)
+        
         from sqlalchemy.orm import selectinload
         
         from src.models.quiz_question_model import QuizQuestionModel
@@ -1181,6 +1210,8 @@ class CourseService:
     async def submit_quiz_attempt(
         self, quiz_id: int, attempt_id: int, payload: QuizSubmitRequest, user_id: int
     ) -> QuizAttemptView:
+        await self._verify_quiz_enrollment(quiz_id, user_id)
+        
         from sqlalchemy.orm import selectinload
         from src.models.quiz_question_model import QuizQuestionModel
         from src.models.quiz_option_model import QuizOptionModel
@@ -1304,42 +1335,13 @@ class CourseService:
         return await self.get_quiz_attempt(quiz_id, attempt_id, user_id)
 
     async def list_quiz_attempts(self, quiz_id: int, user_id: int, page: int = 1, size: int = 20):
+        await self._verify_quiz_enrollment(quiz_id, user_id)
         from sqlalchemy.orm import selectinload
         from src.models.quiz_submission_model import QuizSubmissionModel
-        from src.models.lesson_content_model import LessonContentModel, LessonContentType
-        from src.models.lesson_model import LessonModel
-        from src.models.section_model import SectionModel
-        from src.models.enrollment_model import EnrollmentModel
         from src.models.quiz_model import QuizModel
         from src.models.quiz_attempt_model import QuizAttemptModel
         from fastapi import HTTPException
-        
-        # Verify course access
-        stmt = (
-            select(LessonContentModel)
-            .options(
-                selectinload(LessonContentModel.lesson).selectinload(LessonModel.section)
-            )
-            .where(
-                LessonContentModel.content_type == LessonContentType.QUIZ,
-                LessonContentModel.content_id == quiz_id
-            )
-        )
-        lesson_content = (await self.db_session.execute(stmt)).scalar_one_or_none()
-        if not lesson_content:
-            raise HTTPException(status_code=404, detail="Quiz not found in any curriculum")
-            
-        course_id = lesson_content.lesson.section.course_id
-        
-        # Check enrollment
-        enroll_stmt = select(EnrollmentModel).where(
-            EnrollmentModel.student_id == user_id,
-            EnrollmentModel.course_id == course_id,
-            EnrollmentModel.status == EnrollStatus.ENROLLED.value
-        )
-        enrollment = (await self.db_session.execute(enroll_stmt)).scalar_one_or_none()
-        if not enrollment:
-            raise HTTPException(status_code=403, detail="Not enrolled in the course containing this quiz")
+
             
         # Get attempts history
         offset = (page - 1) * size
