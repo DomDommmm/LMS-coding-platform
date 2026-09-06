@@ -17,7 +17,6 @@ from src.models.problem_config_model import ProblemConfigModel
 from src.models.problem_model import ProblemModel
 from src.models.problem_tag_mapping_model import ProblemTagMappingModel
 from src.models.problem_tag_model import ProblemTagModel
-from src.models.quiz_enrollment_model import QuizEnrollmentModel
 from src.models.quiz_attempt_model import QuizAttemptModel
 from src.models.quiz_model import QuizModel
 from src.models.quiz_option_model import QuizOptionModel
@@ -44,7 +43,7 @@ __all__ = [
     "CourseReviewModel", "EnrollmentModel", "InterviewMessageModel", "InterviewReportModel",
     "InterviewSessionModel", "LanguageModel", "LessonContentModel", "LessonContentProgressModel",
     "LessonModel", "NotificationModel", "PayoutRequestModel", "ProblemConfigModel", "ProblemModel",
-    "ProblemTagMappingModel", "ProblemTagModel", "QuizAttemptModel", "QuizEnrollmentModel", "QuizModel", "QuizOptionModel",
+    "ProblemTagMappingModel", "ProblemTagModel", "QuizAttemptModel", "QuizModel", "QuizOptionModel",
     "QuizQuestionModel", "QuizSubmissionModel", "ReadingContentModel", "RoleModel", "SectionModel",
     "StudentDailyActivityModel", "StudentProfileModel", "SubmissionModel", "SubmissionResultDetailModel",
     "TeacherProfileModel", "TeacherRegisterHistoryModel", "TeacherRegisterModel", "TestcaseModel",

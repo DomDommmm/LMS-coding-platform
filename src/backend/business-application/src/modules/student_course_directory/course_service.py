@@ -1062,18 +1062,18 @@ class CourseService:
                 LessonContentModel.content_id == quiz_id
             )
         )
-        lesson_content = (await self.db_session.execute(stmt)).scalar_one_or_none()
-        if not lesson_content:
+        lesson_contents = (await self.db_session.execute(stmt)).scalars().all()
+        if not lesson_contents:
             raise HTTPException(status_code=404, detail="Quiz not found in any curriculum")
             
-        course_id = lesson_content.lesson.section.course_id
+        course_ids = {lc.lesson.section.course_id for lc in lesson_contents}
         
         enroll_stmt = select(EnrollmentModel).where(
             EnrollmentModel.student_id == user_id,
-            EnrollmentModel.course_id == course_id,
+            EnrollmentModel.course_id.in_(course_ids),
             EnrollmentModel.status == EnrollStatus.ENROLLED.value
         )
-        enrollment = (await self.db_session.execute(enroll_stmt)).scalar_one_or_none()
+        enrollment = (await self.db_session.execute(enroll_stmt)).scalars().first()
         if not enrollment:
             raise HTTPException(status_code=403, detail="Not enrolled in the course containing this quiz")
 

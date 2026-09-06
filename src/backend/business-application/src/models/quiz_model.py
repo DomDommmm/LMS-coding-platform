@@ -8,7 +8,6 @@ from src.db import Base
 
 if TYPE_CHECKING:
     from src.models.quiz_attempt_model import QuizAttemptModel
-    from src.models.quiz_enrollment_model import QuizEnrollmentModel
     from src.models.quiz_question_model import QuizQuestionModel
 
 
@@ -24,7 +23,6 @@ class QuizModel(Base):
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     questions: Mapped[list["QuizQuestionModel"]] = relationship(back_populates="quiz")
-    enrollments: Mapped[list["QuizEnrollmentModel"]] = relationship(back_populates="quiz")
     attempts_history: Mapped[list["QuizAttemptModel"]] = relationship(
         back_populates="quiz"
     )

@@ -35,21 +35,34 @@ class TestQuizAttempt:
 
     async def test_create_attempt_unenrolled(self):
         from tests.module2.conftest import override_get_async_db_session
+        from src.models.enrollment_model import EnrollmentModel
+        from src.modules.student_course_directory.course_dto import EnrollStatus
+        from src.models.course_model import CourseModel
+        from sqlalchemy import select
+        
         session_gen = override_get_async_db_session()
         async_db_session = await anext(session_gen)
         try:
+            # 1. Arrange: Create an explicit enrollment for student 2 (not seeded for this course)
+            course_stmt = select(CourseModel).where(CourseModel.slug == "python-fundamentals")
+            course = (await async_db_session.execute(course_stmt)).scalar_one()
+            
+            enrollment = EnrollmentModel(student_id=2, course_id=course.id, status=EnrollStatus.ENROLLED.value)
+            async_db_session.add(enrollment)
+            await async_db_session.commit()
+            
             service = CourseService(db_session=async_db_session)
             
-            # 1. Create attempt should succeed (since seeded user 1 is enrolled in python-fundamentals)
-            attempt = await service.create_quiz_attempt(1, 1)
+            # 2. Verify we can create an attempt for student 2
+            attempt = await service.create_quiz_attempt(1, 2)
             assert attempt.id is not None
             
-            # 2. Unenroll from course
-            await service.unenroll_course("python-fundamentals", 1)
+            # 3. Unenroll from course
+            await service.unenroll_course("python-fundamentals", 2)
             
-            # 3. Try to create another attempt -> should fail with 403
+            # 4. Try to create another attempt -> should fail with 403
             with pytest.raises(HTTPException) as exc:
-                await service.create_quiz_attempt(1, 1)
+                await service.create_quiz_attempt(1, 2)
             assert exc.value.status_code == 403
             assert "Not enrolled" in exc.value.detail
         finally:
