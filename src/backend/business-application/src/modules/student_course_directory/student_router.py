@@ -1,10 +1,11 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Path
+from fastapi import APIRouter, Depends, HTTPException, Path, Query
 
 from src.middlewares.auth_middleware import UserPayload, get_current_user
 from src.modules.student_course_directory.course_dependency import get_course_service
 from src.modules.student_course_directory.course_dto import (
+    QuizAttemptListResponse,
     CompleteContentResponse,
     QuizResponse,
     QuizSubmitRequest,
@@ -119,36 +120,13 @@ async def submit_quiz_attempt(
     user_id = _extract_user_id(user)
     return await service.submit_quiz_attempt(quiz_id, attempt_id, payload, user_id)
 
-# ---------------------------------------------------------------------------
-# Endpoint 7 — GET /student/quizzes/{quizId}
-#              path param is {quizId} per spec — Python alias: quiz_id
-# ---------------------------------------------------------------------------
-
-@router.get("/quizzes/{quizId}", response_model=QuizResponse, status_code=200)
-async def get_quiz(
-    quiz_id: Annotated[int, Path(alias="quizId")],
+@router.get("/quizzes/{quiz_id}/attempts", response_model=QuizAttemptListResponse)
+async def list_quiz_attempts(
+    quiz_id: int,
+    page: int = Query(1, ge=1),
+    size: int = Query(20, ge=1, le=100),
     user: UserPayload = Depends(get_current_user),
-    service: CourseService = Depends(get_course_service),
-) -> QuizResponse:
+    service: CourseService = Depends(get_course_service)
+) -> QuizAttemptListResponse:
     user_id = _extract_user_id(user)
-    return await service.get_quiz(quiz_id)
-
-
-# ---------------------------------------------------------------------------
-# Endpoint 8 — POST /student/quizzes/{quizId}/submit
-#              path param is {quizId} per spec — Python alias: quiz_id
-# ---------------------------------------------------------------------------
-
-@router.post(
-    "/quizzes/{quizId}/submit",
-    response_model=QuizSubmitResponse,
-    status_code=200,
-)
-async def submit_quiz(
-    quiz_id: Annotated[int, Path(alias="quizId")],
-    payload: QuizSubmitRequest,
-    user: UserPayload = Depends(get_current_user),
-    service: CourseService = Depends(get_course_service),
-) -> QuizSubmitResponse:
-    user_id = _extract_user_id(user)
-    return await service.submit_quiz(quiz_id, payload, user_id)
+    return await service.list_quiz_attempts(quiz_id, user_id, page, size)

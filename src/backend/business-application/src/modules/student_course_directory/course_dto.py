@@ -153,11 +153,27 @@ class QuizSubmissionView(BaseModel):
     @classmethod
     def parse_answers(cls, v):
         if isinstance(v, str):
+            import json
             try:
-                import json
-                return json.loads(v)
+                parsed = json.loads(v)
             except Exception:
-                return {}
+                return v
+            res = {}
+            if isinstance(parsed, dict):
+                for k, val in parsed.items():
+                    try:
+                        res[int(k)] = int(val)
+                    except (ValueError, TypeError):
+                        pass
+                return res
+        elif isinstance(v, dict):
+            res = {}
+            for k, val in v.items():
+                try:
+                    res[int(k)] = int(val)
+                except (ValueError, TypeError):
+                    pass
+            return res
         return v
 
 
@@ -194,6 +210,10 @@ class QuizAttemptView(BaseModel):
     submission: Optional[QuizSubmissionView] = None
     
     model_config = ConfigDict(from_attributes=True)
+
+
+class QuizAttemptListResponse(BaseModel):
+    data: list[QuizAttemptView]
 
 
 class QuizSubmitRequest(BaseModel):

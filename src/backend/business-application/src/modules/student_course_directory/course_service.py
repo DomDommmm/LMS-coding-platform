@@ -814,6 +814,7 @@ class CourseService:
         if is_free:
             return EnrollResponse(status=EnrollStatus.ENROLLED, checkout_url=None)
         else:
+            # TODO: integrate real PayOS payment gateway — currently returns a placeholder frontend checkout URL
             return EnrollResponse(
                 status=EnrollStatus.PENDING_PAYMENT,
                 checkout_url=f"{FRONTEND_CHECKOUT_URL}/{slug}",
@@ -1301,6 +1302,88 @@ class CourseService:
                 await self.db_session.flush()
                 
         return await self.get_quiz_attempt(quiz_id, attempt_id, user_id)
+
+    async def list_quiz_attempts(self, quiz_id: int, user_id: int, page: int = 1, size: int = 20):
+        from sqlalchemy.orm import selectinload
+        from src.models.quiz_submission_model import QuizSubmissionModel
+        from src.models.lesson_content_model import LessonContentModel, LessonContentType
+        from src.models.lesson_model import LessonModel
+        from src.models.section_model import SectionModel
+        from src.models.enrollment_model import EnrollmentModel
+        from src.models.quiz_model import QuizModel
+        from src.models.quiz_attempt_model import QuizAttemptModel
+        from fastapi import HTTPException
+        
+        # Verify course access
+        stmt = (
+            select(LessonContentModel)
+            .options(
+                selectinload(LessonContentModel.lesson).selectinload(LessonModel.section)
+            )
+            .where(
+                LessonContentModel.content_type == LessonContentType.QUIZ,
+                LessonContentModel.content_id == quiz_id
+            )
+        )
+        lesson_content = (await self.db_session.execute(stmt)).scalar_one_or_none()
+        if not lesson_content:
+            raise HTTPException(status_code=404, detail="Quiz not found in any curriculum")
+            
+        course_id = lesson_content.lesson.section.course_id
+        
+        # Check enrollment
+        enroll_stmt = select(EnrollmentModel).where(
+            EnrollmentModel.student_id == user_id,
+            EnrollmentModel.course_id == course_id,
+            EnrollmentModel.status == EnrollStatus.ENROLLED.value
+        )
+        enrollment = (await self.db_session.execute(enroll_stmt)).scalar_one_or_none()
+        if not enrollment:
+            raise HTTPException(status_code=403, detail="Not enrolled in the course containing this quiz")
+            
+        # Get attempts history
+        offset = (page - 1) * size
+        list_stmt = (
+            select(QuizAttemptModel)
+            .options(
+                selectinload(QuizAttemptModel.quiz),
+                selectinload(QuizAttemptModel.submission)
+            )
+            .where(
+                QuizAttemptModel.quiz_id == quiz_id,
+                QuizAttemptModel.student_id == user_id
+            )
+            .order_by(QuizAttemptModel.started_at.desc())
+            .offset(offset)
+            .limit(size)
+        )
+        
+        attempts = (await self.db_session.execute(list_stmt)).scalars().all()
+        
+        # Compute passed
+        result = []
+        for attempt in attempts:
+            passed = None
+            if attempt.submission:
+                passed = attempt.submission.score >= attempt.quiz.passing_score
+                
+            result.append(QuizAttemptView(
+                id=attempt.id,
+                quiz_id=attempt.quiz_id,
+                student_id=attempt.student_id,
+                attempt_no=attempt.attempt_no,
+                status=attempt.status,
+                started_at=attempt.started_at,
+                submitted_at=attempt.submitted_at,
+                passed=passed,
+                attempts_left=None,
+                expires_at=attempt.quiz.end_date,
+                submission=attempt.submission,
+                questions=None
+            ))
+            
+        from src.modules.student_course_directory.course_dto import QuizAttemptListResponse
+        return QuizAttemptListResponse(data=result)
 
     # ------------------------------------------------------------------
     # Endpoint 7 — GET /student/quizzes/{quizId}

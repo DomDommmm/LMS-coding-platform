@@ -444,7 +444,7 @@ async def seed_learning_and_commerce(
         QuizSubmissionModel(
             quiz_attempt_id=quiz_attempt.id,
             score=Decimal("100"),
-            answers='{"variables": "no_constant_keyword", "list_length": "4"}',
+            answers='{"1": 2, "2": 4}',
             submitted_at=seed_time - timedelta(days=4),
         )
     )

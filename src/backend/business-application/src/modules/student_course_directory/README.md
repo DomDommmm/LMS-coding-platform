@@ -11,6 +11,7 @@ Module này quản lý các tính năng liên quan đến học viên, danh mụ
 
 ### 2. Enrollment & Tiến độ học tập
 - `POST /api/courses/{slug}/enroll`: Đăng ký khóa học (yêu cầu Auth). Hỗ trợ khóa học miễn phí (đăng ký thành công ngay) và khóa học trả phí (trả về URL thanh toán PayOS).
+  - *Lưu ý: Thanh toán khóa trả phí hiện dùng URL checkout tạm (FRONTEND_CHECKOUT_URL), việc tích hợp PayOS thật sẽ do thành viên khác đảm nhiệm.*
 - `POST /api/courses/{slug}/unenroll`: Hủy đăng ký khóa học.
 - `GET /api/courses/enrolled`: Xem danh sách các khóa học đã đăng ký.
 - `GET /api/courses/{slug}/study-content`: Lấy nội dung học thuật để bắt đầu học.
