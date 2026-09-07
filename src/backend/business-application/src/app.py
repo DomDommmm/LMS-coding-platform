@@ -17,6 +17,8 @@ from src.modules.lesson_comment.lesson_comment_router import (
 )
 from src.modules.student_course_directory.course_router import router as course_router
 from src.modules.student_course_directory.student_router import router as student_router
+from src.modules.student_course_directory.favorite_router import router as favorite_router
+from src.modules.student_course_directory.course_review_router import router as course_review_router
 from src.modules.user.user_router import admin_router, router as user_router
 from src.modules.submission.submission_route import router as submission_router
 from src.modules.teacher import router as teacher_router
@@ -83,6 +85,8 @@ v1_router = APIRouter(prefix="/api")
 v1_router.include_router(health_router)
 v1_router.include_router(course_router)
 v1_router.include_router(student_router)
+v1_router.include_router(favorite_router)
+v1_router.include_router(course_review_router)
 v1_router.include_router(submission_router)
 v1_router.include_router(lesson_comment_router)
 v1_router.include_router(teacher_router)

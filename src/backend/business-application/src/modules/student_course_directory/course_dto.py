@@ -3,7 +3,7 @@ from datetime import datetime
 from typing import Optional
 
 from pydantic import BaseModel, ConfigDict
-from src.models.base_model import LessonContentType
+from src.models.base_model import LessonContentType, QuizAttemptStatus
 
 
 class PriceType(str, Enum):
@@ -91,10 +91,10 @@ class LessonContentStudyResponse(BaseModel):
     id: int
     content_type: LessonContentType
     media_url: Optional[str] = None
+    quiz_id: Optional[int] = None
+    reading_content_id: Optional[int] = None
     completed: bool
     model_config = ConfigDict(from_attributes=True)
-
-
 class LessonStudyResponse(BaseModel):
     id: int
     title: str
@@ -124,6 +124,8 @@ class CompleteContentResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+
+
 class QuizOptionResponse(BaseModel):
     id: int
     text: str
@@ -137,19 +139,93 @@ class QuizQuestionResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
-class QuizResponse(BaseModel):
+class QuizSubmissionView(BaseModel):
     id: int
-    title: str
-    # Teacher-configured pass threshold (0–10 scale, matches quiz.passing_score in DB).
-    # Kept in this response so submit_quiz can compare without a second DB lookup.
-    passing_score: float
-    questions: list[QuizQuestionResponse]
+    quiz_attempt_id: int
+    score: float
+    answers: dict[int, int]
+    submitted_at: datetime
+    model_config = ConfigDict(from_attributes=True)
+    
+    from pydantic import field_validator
+    
+    @field_validator("answers", mode="before")
+    @classmethod
+    def parse_answers(cls, v):
+        if isinstance(v, str):
+            import json
+            try:
+                parsed = json.loads(v)
+            except Exception:
+                return v
+            res = {}
+            if isinstance(parsed, dict):
+                for k, val in parsed.items():
+                    try:
+                        res[int(k)] = int(val)
+                    except (ValueError, TypeError):
+                        pass
+                return res
+        elif isinstance(v, dict):
+            res = {}
+            for k, val in v.items():
+                try:
+                    res[int(k)] = int(val)
+                except (ValueError, TypeError):
+                    pass
+            return res
+        return v
+
+
+class QuizOptionView(BaseModel):
+    id: int
+    question_id: int
+    content: str
     model_config = ConfigDict(from_attributes=True)
 
 
+class QuizQuestionView(BaseModel):
+    id: int
+    quiz_id: int
+    title: Optional[str] = None
+    content: str
+    question_type: str
+    points: float
+    options: list[QuizOptionView]
+    model_config = ConfigDict(from_attributes=True)
+
+
+class QuizAttemptView(BaseModel):
+    id: int
+    quiz_id: int
+    student_id: int
+    attempt_no: int
+    status: QuizAttemptStatus
+    started_at: datetime
+    submitted_at: Optional[datetime] = None
+    passed: Optional[bool] = None
+    attempts_left: Optional[int] = None
+    expires_at: Optional[datetime] = None
+    questions: Optional[list[QuizQuestionView]] = None
+    submission: Optional[QuizSubmissionView] = None
+    
+    model_config = ConfigDict(from_attributes=True)
+
+
+class QuizAttemptListResponse(BaseModel):
+    data: list[QuizAttemptView]
+
+
 class QuizSubmitRequest(BaseModel):
-    # Map of question_id -> selected option_id
     answers: dict[int, int]
+    model_config = ConfigDict(from_attributes=True)
+
+
+class QuizResponse(BaseModel):
+    id: int
+    title: str
+    passing_score: float
+    questions: list[QuizQuestionResponse]
     model_config = ConfigDict(from_attributes=True)
 
 

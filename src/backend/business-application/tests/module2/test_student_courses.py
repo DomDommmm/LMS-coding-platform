@@ -27,7 +27,7 @@ import pytest
 
 from tests.module2.conftest import UNKNOWN_SLUG
 
-STUDY_SLUG = "nhap-mon-lap-trinh-python"
+STUDY_SLUG = "python-fundamentals"
 
 
 # ---------------------------------------------------------------------------
@@ -62,6 +62,42 @@ class TestGetEnrolledCourses:
         for item in items:
             assert isinstance(item["progress_percent"], float)
             assert 0.0 <= item["progress_percent"] <= 100.0
+
+    def test_get_enrolled_courses_returns_correct_progress(self, client):
+        response = client.get("/api/student/courses")
+        
+        assert response.status_code == 200
+        items = response.json()["items"]
+        
+        # In seed.py, student 1 is enrolled in python-fundamentals (free) and advanced-algorithms (paid)
+        # free_course has 3 contents, all 3 are completed = 100.0%
+        # paid_course has 1 content, 0 completed = 0.0%
+        for item in items:
+            if item["slug"] == "python-fundamentals":
+                assert item["progress_percent"] == 100.0
+            elif item["slug"] == "advanced-algorithms":
+                assert item["progress_percent"] == 0.0
+
+    def test_get_enrolled_courses_returns_empty_when_no_enrollments(self, unauth_client):
+        # Create a new user override that has no enrollments
+        def override_get_no_enrollments_user():
+            return {"sub": 99999, "email": "empty@gmail.com", "roles": ["STUDENT"]}
+            
+        from src.app import app
+        from src.middlewares.auth_middleware import get_current_user
+        from tests.module2.conftest import override_get_async_db_session
+        from src.db import get_async_db_session
+        
+        app.dependency_overrides[get_current_user] = override_get_no_enrollments_user
+        app.dependency_overrides[get_async_db_session] = override_get_async_db_session
+        
+        response = unauth_client.get("/api/student/courses")
+        
+        assert response.status_code == 200
+        assert response.json()["items"] == []
+        
+        app.dependency_overrides.pop(get_current_user, None)
+        app.dependency_overrides.pop(get_async_db_session, None)
 
     def test_get_enrolled_courses_returns_401_without_auth(self, unauth_client):
         response = unauth_client.get("/api/student/courses")
@@ -105,23 +141,16 @@ class TestGetStudyContent:
             for field in ("id", "title", "position", "locked", "contents"):
                 assert field in lesson, f"Lesson missing field: {field}"
 
-    def test_get_study_content_lesson_locked_matches_mock_rule(self, client):
-        # Asserts the exact mock values set in course_service.py _MOCK_STUDY_DATA:
-        #   Section 0: lesson[0]=locked:False, lesson[1]=locked:False,
-        #              lesson[2]=locked:True,  lesson[3]=locked:True
-        # Q3 decision: fixed mock values, no sequential business logic.
+    def test_get_study_content_lesson_locked_is_false(self, client):
+        # In DB implementation, locked is always False until completion_policy is implemented
         response = client.get(f"/api/student/courses/{STUDY_SLUG}/study")
 
         assert response.status_code == 200
-        lessons = response.json()["sections"][0]["lessons"]
-
-        # First lesson must be unlocked (accessible to any enrolled student)
-        assert lessons[0]["locked"] is False, "Lesson 0 should be unlocked"
-        # Second lesson also unlocked per mock rule
-        assert lessons[1]["locked"] is False, "Lesson 1 should be unlocked"
-        # Remaining lessons are locked
-        assert lessons[2]["locked"] is True,  "Lesson 2 should be locked"
-        assert lessons[3]["locked"] is True,  "Lesson 3 should be locked"
+        sections = response.json()["sections"]
+        
+        for section in sections:
+            for lesson in section["lessons"]:
+                assert lesson["locked"] is False, "Lesson should be unlocked by default"
 
     def test_get_study_content_contents_have_required_fields(self, client):
         response = client.get(f"/api/student/courses/{STUDY_SLUG}/study")
@@ -135,12 +164,29 @@ class TestGetStudyContent:
 
     def test_get_study_content_returns_404_for_unknown_slug(self, client):
         response = client.get(f"/api/student/courses/{UNKNOWN_SLUG}/study")
-
         assert response.status_code == 404
-        body = response.json()
-        assert "message" in body
-        assert "detail" in body
-        assert body["code"] == 404
+        assert response.json()["detail"] == "Course not found"
+
+    def test_get_study_content_returns_403_when_not_enrolled(self, unauth_client):
+        # User not enrolled in the course
+        def override_get_no_enrollments_user():
+            return {"sub": 99999, "email": "empty@gmail.com", "roles": ["STUDENT"]}
+            
+        from src.app import app
+        from src.middlewares.auth_middleware import get_current_user
+        from tests.module2.conftest import override_get_async_db_session
+        from src.db import get_async_db_session
+        
+        app.dependency_overrides[get_current_user] = override_get_no_enrollments_user
+        app.dependency_overrides[get_async_db_session] = override_get_async_db_session
+        
+        response = unauth_client.get(f"/api/student/courses/{STUDY_SLUG}/study")
+        
+        assert response.status_code == 403
+        assert response.json()["detail"] == "Not enrolled in this course"
+        
+        app.dependency_overrides.pop(get_current_user, None)
+        app.dependency_overrides.pop(get_async_db_session, None)
 
     def test_get_study_content_returns_401_without_auth(self, unauth_client):
         response = unauth_client.get(f"/api/student/courses/{STUDY_SLUG}/study")

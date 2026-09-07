@@ -86,16 +86,42 @@ class TestGetCourseCatalog:
 class TestGetCourseDetail:
 
     def test_get_course_detail_returns_200_for_existing_slug(self, client):
-        response = client.get("/api/courses/nhap-mon-lap-trinh-python")
+        response = client.get("/api/courses/python-fundamentals")
 
         assert response.status_code == 200
         body = response.json()
-        assert body["slug"] == "nhap-mon-lap-trinh-python"
+        
+        # Assert exact seed data values
+        assert body["slug"] == "python-fundamentals"
+        assert body["title"] == "Python Fundamentals"
+        assert body["description"] == "A practical starter course for new Python learners."
+        assert body["price"] == 0.0
+        assert body["price_type"] == "free"
+        assert body["field"] == "Programming"
+        assert body["tags"] == ["python", "basics"]
+        
+        # We don't assert exact enrolled_count and rating because they depend on seed dynamically,
+        # but we check their types.
+        assert isinstance(body["enrolled_count"], int)
+        assert isinstance(body["rating"], float)
+
         assert "sections" in body
-        assert isinstance(body["sections"], list)
+        sections = body["sections"]
+        assert isinstance(sections, list)
+        assert len(sections) == 2
+        
+        # Section 0: Getting Started (has 2 lessons: Welcome, Quiz)
+        assert sections[0]["title"] == "Getting Started"
+        assert sections[0]["position"] == 0
+        assert sections[0]["lesson_count"] == 2
+        
+        # Section 1: Practice (has 1 lesson: Two Sum)
+        assert sections[1]["title"] == "Practice"
+        assert sections[1]["position"] == 1
+        assert sections[1]["lesson_count"] == 1
 
     def test_get_course_detail_response_has_all_required_fields(self, client):
-        response = client.get("/api/courses/nhap-mon-lap-trinh-python")
+        response = client.get("/api/courses/python-fundamentals")
 
         assert response.status_code == 200
         body = response.json()
@@ -105,7 +131,7 @@ class TestGetCourseDetail:
             assert field in body, f"Missing field: {field}"
 
     def test_get_course_detail_sections_have_required_fields(self, client):
-        response = client.get("/api/courses/nhap-mon-lap-trinh-python")
+        response = client.get("/api/courses/python-fundamentals")
 
         assert response.status_code == 200
         sections = response.json()["sections"]

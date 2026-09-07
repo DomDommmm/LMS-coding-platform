@@ -1,4 +1,4 @@
-﻿import time
+import time
 import re 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from src.helpers.validate_file import validate_file
@@ -53,41 +53,11 @@ async def update_problem(
 
 
 
-"""
-@router.post("/problems/{problem_id}/testcases/upload", response_model=TestcaseUploadResponse, status_code=status.HTTP_201_CREATED)
-async def upload_testcase(
-    problem_id: int,
-    input_file: UploadFile | None = File(None),
-    output_file: UploadFile | None = File(None),
-    score: float = Form(0.0),
-    is_hidden: bool = Form(False),
-    teacher_id: int = Depends(get_current_teacher_id),
-    service: TeacherProblemService = Depends(get_teacher_problem_service) 
-):
-    if not input_file or not output_file:
-        raise HTTPException(status_code=400, detail="Both input_file and output_file are required")
-        
-    validate_file(input_file)
-    validate_file(output_file)
-    
-    # Mock upload by generating fake object keys
-    ts = int(time.time())
-    mock_input_key = f"s3://mock-bucket/problems/{problem_id}/tc_{ts}_in.txt"
-    mock_output_key = f"s3://mock-bucket/problems/{problem_id}/tc_{ts}_out.txt"
-    
-    return await service.upload_testcase(
-        teacher_id=teacher_id,
-        problem_id=problem_id,
-        input_file=mock_input_key,
-        output_file=mock_output_key,
-        score=score,
-        is_hidden=is_hidden
-    )
-"""
+
 @router.post("/problems/{problem_id}/testcases/upload" , response_model=TestcaseUploadResponse , status_code = status.HTTP_201_CREATED) 
 async def upload_testcase(
     problem_id : int, 
-    data : UploadTestcase, 
+    data : UploadTestcase = Depends(), 
     input: UploadFile = File(...),  
     output: UploadFile = File(...), 
     service : TeacherProblemService = Depends(get_teacher_problem_service),

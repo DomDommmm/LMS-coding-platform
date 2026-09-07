@@ -198,3 +198,7 @@ pyrightconfig.json
 # Agent session handoff (local only)
 docs/smtp-rabbitmq-setup-summary.md
 
+
+# Local test scripts
+run_test*.ps1
+test_db.py

@@ -50,12 +50,14 @@ async def get_course_detail(
 # Endpoint 3 — POST /courses/{slug}/enroll  (auth required → 201)
 # ---------------------------------------------------------------------------
 
+from fastapi.responses import JSONResponse
+
 @router.post("/{slug}/enroll", response_model=EnrollResponse, status_code=201)
 async def enroll_course(
     slug: Annotated[str, Path()],
     user: UserPayload = Depends(get_current_user),
     service: CourseService = Depends(get_course_service),
-) -> EnrollResponse:
+) -> EnrollResponse | JSONResponse:
     user_id: int | None = user.get("sub", None)
     if not user_id:
         raise HTTPException(
