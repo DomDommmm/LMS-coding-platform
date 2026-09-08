@@ -1,6 +1,5 @@
 
 from typing import List
-from fastapi import security
 import jwt
 from fastapi import Depends, HTTPException, Header
 from jwt import InvalidTokenError
@@ -49,12 +48,20 @@ async def get_current_user(
         payload = jwt.decode(token, public_key, algorithms=RS_ALGORITHM)
         # payload format: {"sub": str(client_id), "email": email, "roles": roles}
         sub = payload.get("sub", None)
-        if not sub or not isinstance(sub, str):
+        email = payload.get("email")
+        raw_roles = payload.get("roles")
+        if not sub or not isinstance(sub, str) or not isinstance(email, str) or not isinstance(raw_roles, list):
             raise credential_exception("Invalid authorization token body")
         user_id = int(sub)
+        roles: list[str] = []
+        for role in raw_roles:
+            if not isinstance(role, str):
+                raise credential_exception("Invalid authorization token body")
+            roles.append(role)
         return {
-            **payload,
             "sub": user_id,
+            "email": email,
+            "roles": roles,
         }
     except (InvalidTokenError, TypeError, ValueError):
         raise credential_exception("Could not validate credentials")

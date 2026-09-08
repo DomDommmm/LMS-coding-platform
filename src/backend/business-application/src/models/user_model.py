@@ -16,7 +16,6 @@ if TYPE_CHECKING:
     from src.models.interview_session_model import InterviewSessionModel
     from src.models.notification_model import NotificationModel
     from src.models.problem_model import ProblemModel
-    from src.models.quiz_enrollment_model import QuizEnrollmentModel
     from src.models.quiz_attempt_model import QuizAttemptModel
     from src.models.role_model import UserRoleModel
     from src.models.student_daily_activity_model import StudentDailyActivityModel
@@ -52,7 +51,6 @@ class UserModel(TimestampMixin, Base):
     teaching_courses: Mapped[list["CourseModel"]] = relationship(back_populates="teacher")
     authored_problems: Mapped[list["ProblemModel"]] = relationship(back_populates="teacher")
     enrollments: Mapped[list["EnrollmentModel"]] = relationship(back_populates="student")
-    quiz_enrollments: Mapped[list["QuizEnrollmentModel"]] = relationship(back_populates="student")
     quiz_attempts: Mapped[list["QuizAttemptModel"]] = relationship(
         back_populates="student"
     )

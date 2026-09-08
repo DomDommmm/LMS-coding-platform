@@ -33,7 +33,7 @@ class CourseModel(TimestampMixin, Base):
         SQLEnum(CourseStatus), default=CourseStatus.DRAFT, nullable=False
     )
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-
+    #Thuc hien denormalize. Them rating vao ben trong course_model de co the de dang tinht oan 
     teacher: Mapped["UserModel"] = relationship(back_populates="teaching_courses")
     sections: Mapped[list["SectionModel"]] = relationship(back_populates="course")
     enrollments: Mapped[list["EnrollmentModel"]] = relationship(back_populates="course")

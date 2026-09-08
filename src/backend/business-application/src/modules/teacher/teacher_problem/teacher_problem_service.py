@@ -182,10 +182,16 @@ class TeacherProblemService:
     # cac gia tri problem_id, is_hidden, score, teacher_id .... 
     async def upload_testcase(self, teacher_id : int, problem_id : int, score: float, is_hidden: bool, input_file: UploadFile , output_file : UploadFile): 
         try: 
-            # kiem tra xem co dung la teacher voi id nay co the upload testcase cho model nay khong. Tam thoi chua trien khai 
-            # Tam thoi chung ta se tien hanh gan cung 
-            teacher_id = 2 
-            problem_id = 2
+            # Check problem existence and ownership
+            stmt = select(ProblemModel).where(ProblemModel.id == problem_id)
+            result = await self.db.execute(stmt)
+            problem = result.scalar_one_or_none()
+            
+            if not problem:
+                raise HTTPException(status_code=404, detail="Problem not found")
+            if problem.teacher_id != teacher_id:
+                raise HTTPException(status_code=403, detail="You do not have permission to modify this problem")
+
             input_upload_result = self.minio_handler.put_object(
                 file_data = input_file.file, 
                 file_name = input_file.filename, 
