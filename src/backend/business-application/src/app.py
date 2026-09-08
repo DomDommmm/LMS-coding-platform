@@ -15,6 +15,8 @@ from src.modules.health.health_router import router as health_router
 from src.modules.lesson_comment.lesson_comment_router import (
     router as lesson_comment_router,
 )
+from src.modules.payment.payment_router import router as payment_router
+from src.modules.payment.payment_admin_router import router as payment_admin_router
 from src.modules.user.user_router import admin_router, router as user_router
 from src.modules.submission.submission_route import router as submission_router
 from src.modules.teacher import router as teacher_router
@@ -85,6 +87,8 @@ v1_router.include_router(lesson_comment_router)
 v1_router.include_router(teacher_router)
 v1_router.include_router(user_router)
 v1_router.include_router(admin_router)
+v1_router.include_router(payment_router)
+v1_router.include_router(payment_admin_router)
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request, exc: RequestValidationError):
