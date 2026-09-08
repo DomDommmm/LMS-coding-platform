@@ -1,5 +1,4 @@
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime
 
 from fastapi import APIRouter, FastAPI
 from fastapi.exceptions import RequestValidationError
@@ -11,14 +10,11 @@ from src.bases.constants.submission_queues import SUBMISSION_EXECUTION_RESULT_QU
 from src.cores.settings import RABBITMQ_URL
 from src.grpc.client import AuthGrpcClient
 from src.jwk_service import PublicKeyService
+from src.modules.course_directory.course_directory_router import router as course_directory_router
 from src.modules.health.health_router import router as health_router
 from src.modules.lesson_comment.lesson_comment_router import (
     router as lesson_comment_router,
 )
-from src.modules.student_course_directory.course_router import router as course_router
-from src.modules.student_course_directory.student_router import router as student_router
-from src.modules.student_course_directory.favorite_router import router as favorite_router
-from src.modules.student_course_directory.course_review_router import router as course_review_router
 from src.modules.user.user_router import admin_router, router as user_router
 from src.modules.submission.submission_route import router as submission_router
 from src.modules.teacher import router as teacher_router
@@ -83,10 +79,7 @@ app.add_middleware(
 v1_router = APIRouter(prefix="/api")
 
 v1_router.include_router(health_router)
-v1_router.include_router(course_router)
-v1_router.include_router(student_router)
-v1_router.include_router(favorite_router)
-v1_router.include_router(course_review_router)
+v1_router.include_router(course_directory_router)
 v1_router.include_router(submission_router)
 v1_router.include_router(lesson_comment_router)
 v1_router.include_router(teacher_router)
@@ -95,39 +88,26 @@ v1_router.include_router(admin_router)
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request, exc: RequestValidationError):
-    errors = []
-
-    for err in exc.errors():
-        errors.append(
-            {
-                "field": err["loc"][-1],
-                "message": err["msg"],
-            }
-        )
-
-    return JSONResponse(
-        status_code=422,
-        content={
-            "message": "Cloudian Notification Request",
-            "errors": errors,
-        },
-    )
+    return JSONResponse(status_code=422, content={
+        "message": "Invalid request", "error_code": "VALIDATION_ERROR",
+        "details": [{"field": ".".join(map(str, error["loc"])), "reason": error["msg"]} for error in exc.errors()],
+    })
 
 
 @app.exception_handler(StarletteHTTPException)
 async def http_exception_handler(request, exc: StarletteHTTPException):
-    return JSONResponse(
-        status_code=exc.status_code,
-        content={
-            "message": "Cloudian Notification",
-            "code": exc.status_code,
-            "detail": str(exc.detail),
-            # Them thoi gian dien ra loi:
-            # "timestamp":
-            "timestamp": datetime.now(UTC).isoformat(),
-            "path": request.url.path,
-        },
-    )
+    codes = {400: "INVALID_REQUEST", 401: "UNAUTHENTICATED", 403: "FORBIDDEN",
+             404: "NOT_FOUND", 409: "INVALID_STATE", 410: "PAYMENT_EXPIRED",
+             422: "VALIDATION_ERROR", 429: "RATE_LIMITED"}
+    detail = exc.detail
+    if isinstance(detail, dict):
+        payload = {"message": detail.get("message", "Request failed"),
+                   "error_code": detail.get("error_code", codes.get(exc.status_code, "INVALID_REQUEST")),
+                   "details": detail.get("details", [])}
+    else:
+        code = "DUPLICATE_RESOURCE" if str(detail).startswith("DUPLICATE_RESOURCE:") else codes.get(exc.status_code, "INVALID_REQUEST")
+        payload = {"message": str(detail), "error_code": code, "details": []}
+    return JSONResponse(status_code=exc.status_code, content=payload, headers=exc.headers)
 
 
 app.include_router(v1_router)

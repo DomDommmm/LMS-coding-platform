@@ -13,7 +13,7 @@ class TestCourseReview:
         # Use course 2, which student is enrolled in but hasn't reviewed yet.
         res = client.post(f"/api/courses/{self.unreviewed_course_id}/reviews", json={"rating": 5, "content": "Great course!"})
         assert res.status_code == 200
-        data = res.json()
+        data = res.json()["data"]
         assert data["course_id"] == self.unreviewed_course_id
         assert data["student_id"] == 1
         assert data["rating"] == 5
@@ -24,17 +24,17 @@ class TestCourseReview:
         # Use course 1, which student has already reviewed in seed data.
         res = client.post(f"/api/courses/{self.reviewed_course_id}/reviews", json={"rating": 3})
         assert res.status_code == 409
-        assert "DUPLICATE_RESOURCE" in res.json()["detail"]
+        assert res.json()["error_code"] == "DUPLICATE_RESOURCE"
         
     def test_patch_review_returns_200_and_updates(self, client: AsyncClient):
         # First, fetch the existing review for course 1 to get its ID
         res_get = client.get(f"/api/courses/{self.reviewed_course_id}/reviews")
-        review_id = res_get.json()["items"][0]["id"]
+        review_id = res_get.json()["data"][0]["id"]
         
         # Patch the review
         res = client.patch(f"/api/courses/{self.reviewed_course_id}/reviews/{review_id}", json={"rating": 4, "content": "Updated review content"})
         assert res.status_code == 200
-        data = res.json()
+        data = res.json()["data"]
         assert data["rating"] == 4
         assert data["content"] == "Updated review content"
         
@@ -50,7 +50,7 @@ class TestCourseReview:
         assert data["summary"]["total_reviews"] >= 1
         assert "5" in data["summary"]["rating_distribution"]
         
-        assert len(data["items"]) >= 1
+        assert len(data["data"]) >= 1
 
 
 def test_add_review_returns_401_without_auth(unauth_client):

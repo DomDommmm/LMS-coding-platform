@@ -106,8 +106,9 @@ def client():
 
     app.dependency_overrides[get_current_user] = override_get_current_user
     app.dependency_overrides[get_async_db_session] = override_get_async_db_session
-    with TestClient(app) as test_client:
-        yield test_client
+    test_client = TestClient(app)
+    yield test_client
+    test_client.close()
     # Teardown: remove exactly this override; other keys in the dict are untouched.
     app.dependency_overrides.pop(get_current_user, None)
     app.dependency_overrides.pop(get_async_db_session, None)
@@ -121,5 +122,6 @@ def unauth_client():
     get_current_user runs normally — no valid Bearer token → 401.
     Use this fixture to assert that auth-required endpoints reject unauthenticated requests.
     """
-    with TestClient(app, raise_server_exceptions=False) as test_client:
-        yield test_client
+    test_client = TestClient(app, raise_server_exceptions=False)
+    yield test_client
+    test_client.close()
