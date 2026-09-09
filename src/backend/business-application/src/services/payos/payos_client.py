@@ -43,6 +43,8 @@ class PayOSClient:
         cancel_url: str,
     ) -> dict[str, Any]:
         """Gọi API PayOS tạo link thanh toán VietQR."""
+        if not (self.client_id and self.api_key and self.checksum_key):
+            raise RuntimeError("PayOS credentials are not configured (PAYOS_CLIENT_ID/PAYOS_API_KEY/PAYOS_CHECKSUM_KEY)")
         clean_desc = description[:25]  # PayOS giới hạn 25 ký tự
         payload_to_sign = {
             "amount": amount,
@@ -64,7 +66,11 @@ class PayOSClient:
         async with httpx.AsyncClient(timeout=15.0) as client:
             try:
                 response = await client.post(PAYOS_API_URL, json=body, headers=headers)
-                data = response.json()
+                try:
+                    data = response.json()
+                except ValueError as exc:
+                    logger.error("PayOS returned non-JSON response (status=%s)", response.status_code)
+                    raise RuntimeError("PayOS returned an invalid (non-JSON) response") from exc
                 if response.status_code != 200 or data.get("code") != "00":
                     logger.error("PayOS Error Response: %s", data)
                     raise RuntimeError(f"PayOS error: {data.get('desc', 'Unknown error')}")
@@ -79,6 +85,8 @@ class PayOSClient:
         cancellation_reason: str = "Khách hàng hủy đơn",
     ) -> dict[str, Any]:
         """Gọi API PayOS hủy link thanh toán."""
+        if not (self.client_id and self.api_key and self.checksum_key):
+            raise RuntimeError("PayOS credentials are not configured (PAYOS_CLIENT_ID/PAYOS_API_KEY/PAYOS_CHECKSUM_KEY)")
         url = f"https://api-merchant.payos.vn/v2/payment-requests/{order_code_or_id}/cancel"
         headers = {
             "x-client-id": self.client_id,
@@ -91,7 +99,11 @@ class PayOSClient:
         async with httpx.AsyncClient(timeout=15.0) as client:
             try:
                 response = await client.post(url, json=body, headers=headers)
-                data = response.json()
+                try:
+                    data = response.json()
+                except ValueError:
+                    logger.warning("PayOS Cancel returned non-JSON response (status=%s)", response.status_code)
+                    return {}
                 if response.status_code != 200 or data.get("code") != "00":
                     logger.warning("PayOS Cancel Response: %s", data)
                 return data.get("data", {})
@@ -101,6 +113,9 @@ class PayOSClient:
 
     def verify_webhook_signature(self, webhook_data: dict[str, Any], signature: str) -> bool:
         """Xác thực chữ ký số webhook HMAC-SHA256 gửi từ PayOS."""
+        if not self.checksum_key:
+            logger.error("PAYOS_CHECKSUM_KEY is not configured")
+            return False
         sorted_keys = sorted(webhook_data.keys())
         parts = []
         for key in sorted_keys:

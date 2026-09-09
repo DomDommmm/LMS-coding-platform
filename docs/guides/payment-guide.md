@@ -9,7 +9,7 @@ Tài liệu này hướng dẫn chi tiết cách cấu hình, sử dụng và ki
 Hệ thống hỗ trợ thanh toán học phí bằng mã VietQR chuẩn Napas qua cổng PayOS với các đặc điểm nổi bật:
 * **Tự động quy đổi tỷ giá (USD ➔ VND)**: Giá khóa học lưu trong DB theo USD, khi tạo đơn thanh toán hệ thống tự động tra cứu tỷ giá thời gian thực từ `open.er-api.com` (có cache 6 giờ) để tính số tiền VND chính xác.
 * **Xác thực bảo mật chữ ký số (HMAC-SHA256)**: Webhook gửi từ PayOS được verify chữ ký theo đúng tiêu chuẩn PayOS để ngăn chặn giả mạo thông tin giao dịch.
-* **ACID Fulfillment**: Khi nhận webhook thanh toán thành công, hệ thống thực hiện trong một Transaction Database duy nhất:
+* **ACID & Concurrent-Safe Fulfillment**: Khi nhận webhook thanh toán từ PayOS (kể cả trường hợp PayOS retry hoặc gửi webhook đồng thời), hệ thống áp dụng cơ chế Row-Level Locking (`SELECT ... FOR UPDATE`) trên bản ghi `TransactionModel` và `WalletModel` để serialize quá trình fulfillment per `transaction_code`. Cơ chế này đảm bảo tính Idempotency an toàn, ngăn chặn tuyệt đối tình trạng race condition, double-credit số dư ví hoặc nhân đôi bản ghi sổ cái (ledger). Toàn bộ các tác vụ sau diễn ra trong cùng một Transaction Database duy nhất:
   1. Đổi trạng thái giao dịch sang `COMPLETED`.
   2. Kích hoạt khóa học cho học viên (`EnrollmentModel` với `status="active"`).
   3. Cộng số dư ví khả dụng của giảng viên (`WalletModel.available_balance`).
@@ -198,13 +198,15 @@ curl -X POST "http://localhost:4000/api/payments/transactions/TXN-1725820492123/
 
 ---
 
-### 3.5. Danh sách giao dịch & Ghi danh (Dành cho Admin)
+### 3.5. Danh sách giao dịch & Ghi danh (Dành cho Admin - Yêu cầu Role ADMIN)
 
 * **Danh sách tất cả giao dịch**:
   * `GET /api/admin/payments?page=1&size=20&status=COMPLETED`
+  * Header: `Authorization: Bearer <token_admin>` (Yêu cầu Role `ADMIN`)
   * Hỗ trợ lọc theo `status`: `PENDING`, `COMPLETED`, `FAILED`.
 * **Danh sách tất cả lượt đăng ký khóa học**:
   * `GET /api/admin/enrollments?page=1&size=20`
+  * Header: `Authorization: Bearer <token_admin>` (Yêu cầu Role `ADMIN`)
 
 ---
 

@@ -61,6 +61,32 @@ class PaymentService:
         if enroll_res.scalar_one_or_none() is not None:
             raise HTTPException(status_code=409, detail={"message": "Bạn đã đăng ký khóa học này rồi", "error_code": "DUPLICATE_RESOURCE"})
             
+        # 1. Kiểm tra Idempotency-Key: scope theo student_id để tránh va chạm giữa các user
+        scoped_idemp_key = f"{student_id}:{idempotency_key}" if idempotency_key else str(uuid.uuid4())
+        if idempotency_key:
+            idemp_stmt = select(TransactionModel).where(
+                TransactionModel.student_id == student_id,
+                TransactionModel.idempotency_key == scoped_idemp_key,
+            )
+            idemp_tx = (await self.db.execute(idemp_stmt)).scalar_one_or_none()
+            if idemp_tx:
+                order_code = int(idemp_tx.transaction_code.replace("TXN-", ""))
+                return PaymentTransactionView(
+                    transaction_code=idemp_tx.transaction_code,
+                    order_code=order_code,
+                    checkout_url=idemp_tx.payos_link or "",
+                    qrcode=None,
+                    amount=float(idemp_tx.amount),
+                    status=idemp_tx.status,
+                    expires_at=idemp_tx.expires_at,
+                    completed_at=idemp_tx.completed_at,
+                    created_at=idemp_tx.created_at,
+                    updated_at=idemp_tx.updated_at,
+                    course_id=idemp_tx.course_id,
+                    student_id=idemp_tx.student_id,
+                )
+
+        # 2. Kiểm tra nếu học viên đã có đơn PENDING chưa hết hạn cho khóa học này
         pending_stmt = select(TransactionModel).where(
             TransactionModel.student_id == student_id,
             TransactionModel.course_id == course.id,
@@ -78,16 +104,20 @@ class PaymentService:
                     order_code=order_code,
                     checkout_url=existing_tx.payos_link or "",
                     qrcode=None,
-                    amount=int(existing_tx.amount),
+                    amount=float(existing_tx.amount),
                     status=existing_tx.status,
-                    expires_at=existing_tx.expires_at
+                    expires_at=existing_tx.expires_at,
+                    completed_at=existing_tx.completed_at,
+                    created_at=existing_tx.created_at,
+                    updated_at=existing_tx.updated_at,
+                    course_id=existing_tx.course_id,
+                    student_id=existing_tx.student_id,
                 )
             existing_tx.status = PaymentStatus.FAILED
             await self.db.commit()
         
         order_code = int(time.time() * 1000) % 9000000000000 + random.randint(100, 999)
         transaction_code = f"TXN-{order_code}"
-        idemp_key = idempotency_key or str(uuid.uuid4())
 
         return_url = f"{FE_URL}/payment-result/?status=success&courseId={course.slug}&orderCode={order_code}"
         cancel_url = f"{FE_URL}/payment-result/?status=cancelled&courseId={course.slug}&orderCode={order_code}"
@@ -112,12 +142,12 @@ class PaymentService:
         new_tx = TransactionModel(
             student_id=student_id,
             course_id=course.id,
-            amount=course.price,
+            amount=float(course.price),
             status=PaymentStatus.PENDING,
             transaction_code=transaction_code,
             payos_code=payos_res.get("paymentLinkId"),
             payos_link=payos_res.get("checkoutUrl"),
-            idempotency_key=idemp_key,
+            idempotency_key=scoped_idemp_key,
             signature_verified=False,
             expires_at=expires_at,
         )
@@ -130,7 +160,7 @@ class PaymentService:
             order_code=order_code,
             checkout_url=new_tx.payos_link or "",
             qrcode=payos_res.get("qrCode"),
-            amount=new_tx.amount,
+            amount=float(new_tx.amount),
             status=new_tx.status,
             expires_at=new_tx.expires_at,
             course_id=new_tx.course_id,
@@ -147,11 +177,13 @@ class PaymentService:
         if not is_valid:
             logger.warning("PayOS Webhook Signature không hợp lệ: %s", payload.signature)
             raise HTTPException(status_code=400, detail={"message": "Chữ ký webhook không hợp lệ", "error_code": "INVALID_REQUEST"})
-        # 2. Tìm Transaction theo order_code
+        # 2. Tìm Transaction theo order_code với row-level lock (FOR UPDATE) để serialize fulfillment per transaction_code
         order_code = payload.data.orderCode
         transaction_code = f"TXN-{order_code}"
-        stmt = select(TransactionModel).where(
-            TransactionModel.transaction_code == transaction_code
+        stmt = (
+            select(TransactionModel)
+            .where(TransactionModel.transaction_code == transaction_code)
+            .with_for_update()
         )
         res = await self.db.execute(stmt)
         tx = res.scalar_one_or_none()
@@ -190,25 +222,27 @@ class PaymentService:
         # C. Cộng tiền ví giảng viên & Ghi sổ cái bất biến (Wallet Ledger)
         course = await self.db.get(CourseModel, tx.course_id)
         if course:
-            wallet_stmt = select(WalletModel).where(
-                WalletModel.teacher_id == course.teacher_id
+            wallet_stmt = (
+                select(WalletModel)
+                .where(WalletModel.teacher_id == course.teacher_id)
+                .with_for_update()
             )
             wallet = (await self.db.execute(wallet_stmt)).scalar_one_or_none()
             if not wallet:
                 wallet = WalletModel(
                     teacher_id=course.teacher_id,
-                    available_balance=0,
-                    pending_balance=0,
+                    available_balance=0.0,
+                    pending_balance=0.0,
                     currency=Currency.USD,
                 )
                 self.db.add(wallet)
                 await self.db.flush()
-            wallet.available_balance = int(wallet.available_balance) + int(tx.amount)
+            wallet.available_balance = round(float(wallet.available_balance) + float(tx.amount), 2)
             ledger = WalletLedgerModel(
                 wallet_id=wallet.id,
                 transaction_id=tx.id,
                 entry_type="REVENUE",
-                amount=tx.amount,
+                amount=float(tx.amount),
                 currency=Currency.USD,
                 created_at=now,
             )
@@ -225,7 +259,7 @@ class PaymentService:
             notify_teacher = NotificationModel(
                 user_id=course.teacher_id,
                 type=NotificationType.PAYMENT_SUCCESS,
-                content=f"{student_name} vừa đăng ký khóa học '{course.title}'. Bạn nhận được {tx.amount:,.2f} USD.",
+                content=f"{student_name} vừa đăng ký khóa học '{course.title}'. Bạn nhận được {float(tx.amount):,.2f} USD.",
                 created_at=now,
             )
             self.db.add_all([notify_student, notify_teacher])
@@ -251,7 +285,7 @@ class PaymentService:
             order_code=order_code,
             course_id=tx.course_id,
             course_slug=course.slug if course else None,
-            amount=int(tx.amount),
+            amount=float(tx.amount),
             status=tx.status,
             completed_at=tx.completed_at,
         )
@@ -259,9 +293,13 @@ class PaymentService:
         self, transaction_code: str, user_id: int
     ) -> CancelTransactionResponse:
         """Hủy giao dịch thanh toán khi người dùng nhấn Hủy."""
-        stmt = select(TransactionModel).where(
-            TransactionModel.transaction_code == transaction_code,
-            TransactionModel.student_id == user_id,
+        stmt = (
+            select(TransactionModel)
+            .where(
+                TransactionModel.transaction_code == transaction_code,
+                TransactionModel.student_id == user_id,
+            )
+            .with_for_update()
         )
         res = await self.db.execute(stmt)
         tx = res.scalar_one_or_none()
@@ -309,7 +347,7 @@ class PaymentService:
                 order_code=order_code,
                 checkout_url=item.payos_link or "",
                 qrcode=None,
-                amount=item.amount,
+                amount=float(item.amount),
                 status=item.status,
                 expires_at=item.expires_at,
                 completed_at=item.completed_at,
